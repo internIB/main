@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "kintai-app",
+    "name": "勤怠管理",
     "slug": "kintai-app",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -26,7 +26,15 @@
     "web": {
       "bundler": "metro",
       "output": "static",
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "name": "勤怠管理",
+      "shortName": "勤怠管理",
+      "lang": "ja",
+      "themeColor": "#4A86C8",
+      "backgroundColor": "#4A86C8",
+      "display": "standalone",
+      "orientation": "portrait",
+      "scope": "/"
     },
     "plugins": [
       "expo-router",

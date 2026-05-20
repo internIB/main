@@ -3,13 +3,12 @@ import {
   View,
   Text,
   TouchableOpacity,
-  FlatList,
+  ScrollView,
   Modal,
   TextInput,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Alert,
 } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -20,29 +19,33 @@ import { sha256 } from '../lib/utils';
 
 export default function LoginScreen() {
   const [members, setMembers] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [membersLoading, setMembersLoading] = useState(false);
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
   const [adminLoading, setAdminLoading] = useState(false);
 
-  const { currentUser, setCurrentUser, setIsAdmin } = useAppStore();
+  const { currentUser, hydrated, setCurrentUser, setIsAdmin } = useAppStore();
 
+  // hydration完了後にリダイレクト or メンバー読み込み
   useEffect(() => {
+    if (!hydrated) return;
     if (currentUser) {
       router.replace('/(tabs)/input');
       return;
     }
     loadMembers();
-  }, [currentUser]);
+  }, [hydrated, currentUser]);
 
   async function loadMembers() {
+    setMembersLoading(true);
     try {
       const list = await getMembers();
       setMembers(list);
-    } catch (e) {
-      Toast.show({ type: 'error', text1: 'メンバーの読み込みに失敗しました' });
+    } catch {
+      // Firebase未設定でも画面は表示する
+      setMembers([]);
     } finally {
-      setLoading(false);
+      setMembersLoading(false);
     }
   }
 
@@ -56,37 +59,34 @@ export default function LoginScreen() {
     if (!adminPassword.trim()) return;
     setAdminLoading(true);
     try {
-      const settings = await getSettings();
-      if (!settings) {
-        const defaultHash = await sha256('IB');
-        const inputHash = await sha256(adminPassword.trim());
-        if (inputHash === defaultHash) {
-          setIsAdmin(true);
-          setCurrentUser('管理者');
-          setShowAdminModal(false);
-          router.replace('/(tabs)/input');
-          return;
-        }
-        Toast.show({ type: 'error', text1: 'パスワードが違います' });
-        return;
-      }
       const inputHash = await sha256(adminPassword.trim());
-      if (inputHash === settings.adminPasswordHash) {
+      let expectedHash: string;
+
+      try {
+        const settings = await getSettings();
+        expectedHash = settings?.adminPasswordHash ?? (await sha256('IB'));
+      } catch {
+        expectedHash = await sha256('IB');
+      }
+
+      if (inputHash === expectedHash) {
         setIsAdmin(true);
         setCurrentUser('管理者');
         setShowAdminModal(false);
+        setAdminPassword('');
         router.replace('/(tabs)/input');
       } else {
         Toast.show({ type: 'error', text1: 'パスワードが違います' });
       }
-    } catch (e) {
+    } catch {
       Toast.show({ type: 'error', text1: 'ログインに失敗しました' });
     } finally {
       setAdminLoading(false);
     }
   }
 
-  if (loading) {
+  // ストア未ハイドレート中はスプラッシュ
+  if (!hydrated) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F0F4FF' }}>
         <ActivityIndicator size="large" color="#4A86C8" />
@@ -96,32 +96,37 @@ export default function LoginScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#F0F4FF' }}>
-      <View style={{ padding: 24, paddingTop: 40 }}>
-        <Text style={{ fontSize: 26, fontWeight: 'bold', color: '#4A86C8', textAlign: 'center', marginBottom: 6 }}>
+      {/* ヘッダー */}
+      <View style={{ paddingTop: 40, paddingHorizontal: 24, paddingBottom: 16 }}>
+        <Text style={{ fontSize: 28, fontWeight: 'bold', color: '#4A86C8', textAlign: 'center', marginBottom: 6 }}>
           勤怠管理
         </Text>
-        <Text style={{ fontSize: 14, color: '#888', textAlign: 'center', marginBottom: 32 }}>
+        <Text style={{ fontSize: 14, color: '#888', textAlign: 'center' }}>
           名前を選択してください
         </Text>
       </View>
 
-      {members.length === 0 ? (
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24 }}>
-          <Text style={{ fontSize: 15, color: '#999', textAlign: 'center', marginBottom: 16 }}>
-            メンバーが登録されていません
-          </Text>
-          <Text style={{ fontSize: 13, color: '#bbb', textAlign: 'center' }}>
-            管理者でログインしてメンバーを追加してください
-          </Text>
-        </View>
-      ) : (
-        <FlatList
-          data={members}
-          keyExtractor={item => item}
-          contentContainerStyle={{ paddingHorizontal: 24 }}
-          renderItem={({ item }) => (
+      {/* メンバーリスト */}
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 16 }}
+      >
+        {membersLoading ? (
+          <ActivityIndicator color="#4A86C8" style={{ marginTop: 40 }} />
+        ) : members.length === 0 ? (
+          <View style={{ alignItems: 'center', marginTop: 40 }}>
+            <Text style={{ fontSize: 15, color: '#999', textAlign: 'center', marginBottom: 8 }}>
+              メンバーが登録されていません
+            </Text>
+            <Text style={{ fontSize: 13, color: '#bbb', textAlign: 'center' }}>
+              管理者でログインしてメンバーを追加してください
+            </Text>
+          </View>
+        ) : (
+          members.map(name => (
             <TouchableOpacity
-              onPress={() => selectMember(item)}
+              key={name}
+              onPress={() => selectMember(name)}
               style={{
                 backgroundColor: '#fff',
                 borderRadius: 12,
@@ -134,12 +139,13 @@ export default function LoginScreen() {
                 elevation: 2,
               }}
             >
-              <Text style={{ fontSize: 17, color: '#333', fontWeight: '600' }}>{item}</Text>
+              <Text style={{ fontSize: 17, color: '#333', fontWeight: '600' }}>{name}</Text>
             </TouchableOpacity>
-          )}
-        />
-      )}
+          ))
+        )}
+      </ScrollView>
 
+      {/* 管理者ログインリンク */}
       <View style={{ padding: 24 }}>
         <TouchableOpacity onPress={() => setShowAdminModal(true)}>
           <Text style={{ textAlign: 'center', color: '#7B1FA2', fontSize: 14, textDecorationLine: 'underline' }}>
@@ -148,6 +154,7 @@ export default function LoginScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* 管理者パスワードモーダル */}
       <Modal visible={showAdminModal} transparent animationType="fade">
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -171,6 +178,7 @@ export default function LoginScreen() {
                 marginBottom: 16,
               }}
               onSubmitEditing={handleAdminLogin}
+              autoFocus
             />
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <TouchableOpacity

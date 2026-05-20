@@ -5,6 +5,7 @@ import * as SecureStore from 'expo-secure-store';
 interface AppState {
   currentUser: string | null;
   isAdmin: boolean;
+  hydrated: boolean;
   googleAccessToken: string | null;
   setCurrentUser: (name: string | null) => void;
   setIsAdmin: (val: boolean) => void;
@@ -13,52 +14,55 @@ interface AppState {
   logout: () => void;
 }
 
-const STORAGE_KEY = 'kintai_current_user';
+const USER_KEY = 'kintai_current_user';
+const ADMIN_KEY = 'kintai_is_admin';
 
-async function saveUser(name: string | null): Promise<void> {
+async function save(key: string, value: string | null): Promise<void> {
   if (Platform.OS === 'web') {
-    if (name) {
-      localStorage.setItem(STORAGE_KEY, name);
-    } else {
-      localStorage.removeItem(STORAGE_KEY);
-    }
+    if (value) localStorage.setItem(key, value);
+    else localStorage.removeItem(key);
   } else {
-    if (name) {
-      await SecureStore.setItemAsync(STORAGE_KEY, name);
-    } else {
-      await SecureStore.deleteItemAsync(STORAGE_KEY);
-    }
+    if (value) await SecureStore.setItemAsync(key, value);
+    else await SecureStore.deleteItemAsync(key);
   }
 }
 
-async function loadUser(): Promise<string | null> {
-  if (Platform.OS === 'web') {
-    return localStorage.getItem(STORAGE_KEY);
-  }
-  return await SecureStore.getItemAsync(STORAGE_KEY);
+async function load(key: string): Promise<string | null> {
+  if (Platform.OS === 'web') return localStorage.getItem(key);
+  return SecureStore.getItemAsync(key);
 }
 
 export const useAppStore = create<AppState>((set) => ({
   currentUser: null,
   isAdmin: false,
+  hydrated: false,
   googleAccessToken: null,
 
   setCurrentUser: (name) => {
     set({ currentUser: name });
-    saveUser(name);
+    save(USER_KEY, name);
   },
 
-  setIsAdmin: (val) => set({ isAdmin: val }),
+  setIsAdmin: (val) => {
+    set({ isAdmin: val });
+    save(ADMIN_KEY, val ? '1' : null);
+  },
 
   setGoogleAccessToken: (token) => set({ googleAccessToken: token }),
 
   loadStoredUser: async () => {
-    const name = await loadUser();
-    if (name) set({ currentUser: name });
+    try {
+      const name = await load(USER_KEY);
+      const adminStr = await load(ADMIN_KEY);
+      set({ currentUser: name, isAdmin: adminStr === '1', hydrated: true });
+    } catch {
+      set({ hydrated: true });
+    }
   },
 
   logout: () => {
     set({ currentUser: null, isAdmin: false, googleAccessToken: null });
-    saveUser(null);
+    save(USER_KEY, null);
+    save(ADMIN_KEY, null);
   },
 }));

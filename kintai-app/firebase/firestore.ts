@@ -99,9 +99,12 @@ export function subscribeChangeRequests(
   callback: (requests: ChangeRequest[]) => void
 ): () => void {
   const ref = collection(db, 'changeRequests');
-  const q = query(ref, where('status', '==', statusFilter), orderBy('createdAt', 'desc'));
+  // orderBy+whereの複合クエリはFirestoreインデックスが必要なため、
+  // whereのみでクエリしてクライアント側でソートする
+  const q = query(ref, where('status', '==', statusFilter));
   return onSnapshot(q, snap => {
     const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as ChangeRequest));
+    data.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
     callback(data);
   });
 }
